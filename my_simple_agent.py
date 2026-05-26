@@ -24,7 +24,7 @@ class MySimpleAgent(SimpleAgent):
         self.enable_tool_calling = enable_tool_calling and tool_registry is not None
         print(f"✅ {name} 初始化完成，工具调用: {'启用' if self.enable_tool_calling else '禁用'}")
     
-    def run(self, input_text: str, max_tool_interations: int =3, **kwargs) -> str:
+    def run(self, input_text: str, max_tool_iterations: int =3, **kwargs) -> str:
         """
         重写的运行方法 - 实现简单对话逻辑，支持可选工具调用
         """
@@ -36,13 +36,13 @@ class MySimpleAgent(SimpleAgent):
         messages = []
 
         #添加系统消息（可能包含信息工具）
-        enhanced_system_prompt = self._get_enchanced_system_prompt()
+        enhanced_system_prompt = self._get_enhanced_system_prompt()
         messages.append({"role": "system", "content": enhanced_system_prompt})
     
 
         #添加历史信息
         for msg in self._history:
-            messages.append({"role": msg.role, "content":msg.scontent})
+            messages.append({"role": msg.role, "content":msg.content})
         
         #添加当前用户消息
         messages.append({"role": "user", "content":input_text})
@@ -55,7 +55,10 @@ class MySimpleAgent(SimpleAgent):
             print(f"✅ {self.name} 响应完成")
             return response
         
-    def _get_ehanced_system_prompt(self) -> str:
+        #支持多轮工具调用的逻辑
+        return self._run_with_tools(messages, input_text, max_tool_iterations, **kwargs)
+
+    def _get_enhanced_system_prompt(self) -> str:
         """构建增强的系统提示词，包含工具信息"""
         base_prompt = self.system_prompt or "你是一个有用的AI助手"
 
@@ -74,10 +77,11 @@ class MySimpleAgent(SimpleAgent):
         tools_section += "\n## 工具调用格式\n"
         tools_section += "当需要使用工具时，请使用以下格式：\n"
         tools_section += "`[TOOL_CALL:{tool_name}:{parameters}]`\n"
-        tools_section += "例如：`[TOOL_CALL:search:Python编码]` 或 `[TOOL_CALL:memory:recall=用户信息]` \n\n"
+        tools_section += "例如：`[TOOL_CALL:search:Python编程]` 或 `[TOOL_CALL:memory:recall=用户信息]` \n\n"
         tools_section += "工具调用结果会自动插入到对话中，然后你可以基于结果继续回答问题。\n"
 
         return base_prompt + tools_section
+
     
     def _run_with_tools(self, messages: list, input_text: str, max_tool_iterations: int, **kwargs) -> str:
         """支持工具调用的运行逻辑"""
@@ -104,6 +108,7 @@ class MySimpleAgent(SimpleAgent):
                     clean_response = clean_response.replace(call['original'],"")
 
                 #构建包含工具结果的消息
+                messages.append({"role":"assistant", "content": clean_response})
 
                 #添加工具结果
                 tool_results_text = "\n\n".join(tool_results)
@@ -129,7 +134,7 @@ class MySimpleAgent(SimpleAgent):
 
     def _parse_tool_calls(self,text:str) -> list:
         """解析文本中的工具调用"""
-        pattern = r'\[TOOL_CALL:([^:+]):([^\]]+)\]'
+        pattern = r'\[TOOL_CALL:([^:]+):([^\]]+)\]'
         matches = re.findall(pattern, text)
 
         tool_calls = []
@@ -153,7 +158,7 @@ class MySimpleAgent(SimpleAgent):
                 result = self.tool_registry.execute_tool(tool_name, parameters)
             else:
                 # 其他工具使用智能参数解析
-                param_dict = self._parse_tool_calls(tool_name, parameters)
+                param_dict = self._parse_tool_parameters(tool_name, parameters)
                 tool = self.tool_registry.get_tool(tool_name)
                 if not tool:
                     return f"❌ 错误:未找到工具 '{tool_name}'"
@@ -181,10 +186,19 @@ class MySimpleAgent(SimpleAgent):
                 # 单个参数：key=value
                 key, value = parameters.split('=', 1)
                 param_dict[key.strip()] = value.strip()
+            
+        else:
+            #直接传入参数，根据工具类型智能判断
+            if tool_name == 'search':
+                param_dict = {'query': parameters}
+            elif tool_name == 'memory':
+                param_dict = {'action': 'search', 'query': parameters}
+            else:
+                param_dict = {'input': parameters}
 
         return param_dict
 
-    def stream_run(self, input_text, **kwargs) -> Iterator[str] :
+    def stream_run(self, input_text, **kwargs) -> Iterator[str]:
         """
         自定义流式运行方法
         """
@@ -196,10 +210,48 @@ class MySimpleAgent(SimpleAgent):
             messages.append({"role":"system","content":self.system_prompt})
         
         for msg in self._history:
-            messages.append({"role":msg.role,"conetnt":msg.content})
+            messages.append({"role":msg.role,"content":msg.content})
         
-        messages.append("role":"user","content": input_text)
+        messages.append({"role":"user","content": input_text})
 
         #流式调用LLM
+        full_response = ""
+        print("📝 实时响应: ", end="")
+        for chunk in self.llm.stream_invoke(messages, **kwargs):
+            full_response += chunk
+            print(chunk, end="", flush=True)
+            yield chunk
+        
+        print() #换行
 
-
+        # 保存完整对话到历史记录
+        self.add_message(Message(input_text, "user"))
+        self.add_message(Message(full_response, "assistant"))
+        print(f"✅ {self.name} 流式响应完成")
+    
+    def add_tool(self, tool) -> None:
+        """添加工具要Agent（便利方法）"""
+        if not self.tool_registry:
+            from hello_agents import ToolRegistry
+            self.tool_registry = ToolRegistry()
+            self.enable_tool_calling = True
+        
+        self.tool_registry.register_tool(tool)
+        print(f"🔧 工具 '{tool.name}' 已添加")
+    
+    def has_tools(self) -> bool:
+        """检查是否有可用工具"""
+        return self.enable_tool_calling and self.tool_registry is not None
+    
+    def remove_tool(self,tool_name: str ) -> bool:
+        """移除工具（便利方法）"""
+        if self.tool_registry:
+            self.tool_registry.unregister(tool_name)
+            return True
+        return False
+    
+    def list_tools(self) -> list:
+        """列出所有可用工具"""
+        if self.tool_registry:
+            return self.tool_registry.list_tools()
+        return []
