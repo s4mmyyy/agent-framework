@@ -4,7 +4,7 @@ MY_REACT_PROMPT = """你是一个具备推理和行动能力的AI助手。你可
 {tools}
 
 ## 工作流程
-请严格按照以下格式进行回应，每次智能执行一个步骤：
+请严格按照以下格式进行回应，每次只能执行一个步骤：
 
 Thought: 你的思考过程，用于分析问题，拆解任何和规划下一步行动。
 Action: 你决定采取的行动，必须是以下格式之一
@@ -15,7 +15,7 @@ Action: 你决定采取的行动，必须是以下格式之一
 1.每次回应必须包含Thought和Action两部分
 2.工具调用的格式必须严格遵循：工具名[参数]
 3.只有你确信有足够信息回答问题时，才使用Finish
-4.如果工具会犯的信息不够，继续使用其他工具或相同工具的不同参数
+4.如果工具返回的信息不够，继续使用其他工具或相同工具的不同参数
 
 ## 当前任务
 **Question:** {question}
@@ -68,15 +68,15 @@ class MyReactAgent(ReActAgent):
             # 1. 构建提示词
             tools_desc = self.tool_registry.get_tools_description()
             history_str = "\n".join(self.current_history)
-            prompt = self.prompt_template(
+            prompt = self.prompt_template.format(
                 tools = tools_desc,
                 question = input_text,
-                histtory = history_str
+                history = history_str
             )
 
             #调用LLM
-            messagess = [{"role":"user","content":prompt}]
-            response_text = self.llm.invoke(messagess, **kwargs)
+            messages = [{"role":"user","content":prompt}]
+            response_text = self.llm.invoke(messages, **kwargs)
 
             #解析输出
             thought, action = self._parse_output(response_text)
