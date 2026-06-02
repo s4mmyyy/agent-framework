@@ -17,7 +17,7 @@ def test_advanced_search():
     test_queries = [
         "Python编程语言的历史",
         "人工智能的最新发展",
-        "2024年科技趋势"
+        "2026年科技趋势"
     ]
 
     for i, query in enumerate(test_queries, 1):

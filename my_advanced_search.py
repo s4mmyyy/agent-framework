@@ -18,7 +18,7 @@ class MyAdvancedSearchTool:
     def _setup_search_sources(self):
         """设置可用的搜索源"""
         # 检查Tavily可用性
-        if os.getenv("SERPAPI_API_KEY"):
+        if os.getenv("TAVILY_API_KEY"):
             try:
                 from tavily import TavilyClient
                 self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
